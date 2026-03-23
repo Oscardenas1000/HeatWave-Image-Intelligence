@@ -1,71 +1,117 @@
 # HeatWave Image Intelligence
 
-Streamlit app for storing image payloads in Oracle HeatWave, browsing the library, and asking HeatWave to describe or analyze a selected image.
+HeatWave Image Intelligence is a Streamlit app for:
 
-## What is in this repo
+- uploading images into Oracle HeatWave as base64 payloads
+- browsing a searchable image library
+- asking HeatWave AI to describe or analyze a selected image with `sys.ML_GENERATE`
 
-- `heatwave_image_app.py` - main Streamlit app
-- `img_to_base64.py` - helper to convert an image file into a base64 text file
-- `A-Class_Plate_NA.png.webp` and `Screenshot 2026-02-17 at 4.38.13 p.m..png` - sample assets
+## Project layout
 
-## Requirements
+- `heatwave_image_app.py`: main Streamlit application
+- `img_to_base64.py`: helper that converts an image file into a base64 text file
+- `requirements.txt`: Python dependencies
+- `.env.example`: required runtime configuration template
+- `scripts/deploy_to_vm.sh`: repeatable Linux VM deployment helper
 
-- Python 3.9 or newer
-- Network access to the HeatWave/MySQL host
-- `pip` access to install Python packages
-- A database user that can create and read the `image_registry.image_assets` table
+## Prerequisites
 
-The app defaults to the current HeatWave connection used by the script, but you can override it with environment variables:
+- Python 3.9+
+- network access to your HeatWave / MySQL instance
+- a database user that can create and read the target schema and table
+- HeatWave `ML_GENERATE` access for image-aware prompts
 
-- `DB_HOST`
-- `DB_PORT`
-- `DB_USER`
-- `DB_PASSWORD`
-- `DB_NAME` or `DB_SCHEMA`
-- `AI_MODEL_ID`
-- `AI_LANGUAGE`
+## Quick start
 
-## Local run
-
-From the repository root:
+1. Create a virtual environment and install dependencies.
 
 ```bash
-python3.9 -m venv .venv
+python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+```
+
+2. Create your local config file.
+
+```bash
+cp .env.example .env
+```
+
+3. Edit `.env` with your HeatWave connection details.
+
+```dotenv
+DB_HOST=your-heatwave-host
+DB_PORT=3306
+DB_USER=your-db-user
+DB_PASSWORD=your-db-password
+DB_SCHEMA=image_registry
+DB_TABLE=image_assets
+AI_MODEL_ID=google.gemini-2.5-pro
+AI_LANGUAGE=en
+```
+
+4. Launch the app.
+
+```bash
 .venv/bin/python heatwave_image_app.py
 ```
 
-`heatwave_image_app.py` will bootstrap Streamlit if needed and then launch the app.
-
-If you already have the dependencies installed in the current interpreter, you can also run:
+The script will hand off to Streamlit automatically. You can also run it directly with:
 
 ```bash
-streamlit run heatwave_image_app.py
+.venv/bin/streamlit run heatwave_image_app.py
 ```
 
-## VM run
+## What the app creates
 
-On the Oracle Linux / RHEL 8 VM used for deployment, the system Python is 3.6 and is too old for modern Streamlit. Install Python 3.9 first, then run the same project commands:
+At startup, the app ensures that the target schema and table exist. By default, it uses:
+
+- schema: `image_registry`
+- table: `image_assets`
+
+Each stored image record includes the image name, original filename, MIME type, base64 payload, and timestamps.
+
+## VM deployment
+
+For a Linux VM, use the included deployment helper:
+
+```bash
+scripts/deploy_to_vm.sh \
+  --host opc@YOUR_VM_IP \
+  --key /path/to/ssh-key.pem \
+  --remote-dir /home/opc/heatwave-image-intelligence
+```
+
+After the copy finishes on the VM:
+
+```bash
+cd /home/opc/heatwave-image-intelligence
+cp .env.example .env
+vi .env
+.venv/bin/python heatwave_image_app.py
+```
+
+If the VM does not already have a modern Python installed, install one first. On Oracle Linux / RHEL that is typically:
 
 ```bash
 sudo dnf install -y python39 python39-pip
-python3.9 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python heatwave_image_app.py
 ```
 
-## Helper script
+## Utility helper
 
-`img_to_base64.py` converts an image to a base64 text file and can optionally include a `data:` URL prefix.
-
-Example:
+To generate a base64 text file from an image:
 
 ```bash
-python img_to_base64.py A-Class_Plate_NA.png.webp
+python3 img_to_base64.py path/to/image.png
+```
+
+To include a `data:` URL prefix:
+
+```bash
+python3 img_to_base64.py --data-url path/to/image.png
 ```
 
 ## Notes
 
-- The app creates the `image_registry.image_assets` table if it does not already exist.
-- The AI response feature uses `sys.ML_GENERATE` and the selected image payload.
-- If the database credentials or HeatWave endpoint change, set the environment variables above before launching the app.
+- Secrets are intentionally not committed. Use `.env` for local or VM-specific credentials.
+- The app validates required environment variables at startup and will stop with a clear error if they are missing.
+- Generated `.base64.txt` files are ignored by git because they can be recreated with `img_to_base64.py`.

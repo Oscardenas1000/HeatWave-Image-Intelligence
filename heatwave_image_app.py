@@ -5,6 +5,7 @@ import importlib.util
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,22 +15,15 @@ from typing import Optional
 
 APP_PATH = Path(__file__).resolve()
 APP_DIR = APP_PATH.parent
+ENV_PATH = APP_DIR / ".env"
 VENV_DIR = APP_DIR / ".venv"
 REQUIRED_PACKAGES = ("streamlit", "mysql-connector-python", "pillow")
-
-DB_HOST = os.getenv("DB_HOST", "163.192.105.216")
-DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_USER = os.getenv("DB_USER", "admin")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "@Mysqlse2025")
-DB_SCHEMA = os.getenv("DB_NAME", os.getenv("DB_SCHEMA", "image_registry"))
-DB_TABLE = "image_assets"
-AI_MODEL_ID = os.getenv("AI_MODEL_ID", "google.gemini-2.5-pro")
-AI_LANGUAGE = os.getenv("AI_LANGUAGE", "en")
 IMAGE_UPLOAD_TYPES = ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
 
 _STREAMLIT = None
 _MYSQL_CONNECTOR = None
 _PIL_IMAGE = None
+_CONFIG = None
 
 
 @dataclass
@@ -38,6 +32,85 @@ class ImagePayload:
     original_filename: str
     mime_type: str
     base64_payload: str
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    db_host: str
+    db_port: int
+    db_user: str
+    db_password: str
+    db_schema: str
+    db_table: str
+    ai_model_id: str
+    ai_language: str
+
+
+def load_dotenv_file(dotenv_path: Path) -> None:
+    if not dotenv_path.exists():
+        return
+
+    for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        os.environ.setdefault(key, value)
+
+
+def get_env(name: str, default: Optional[str] = None, *, required: bool = False) -> str:
+    value = os.getenv(name, default)
+    if required and (value is None or not str(value).strip()):
+        raise RuntimeError(
+            f"Missing required environment variable `{name}`. "
+            "Copy `.env.example` to `.env` and fill in your HeatWave connection details."
+        )
+    return "" if value is None else str(value)
+
+
+def quote_identifier(identifier: str) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
+        raise RuntimeError(
+            f"Invalid SQL identifier `{identifier}`. Use only letters, numbers, and underscores."
+        )
+    return f"`{identifier}`"
+
+
+def get_config() -> AppConfig:
+    global _CONFIG
+    if _CONFIG is not None:
+        return _CONFIG
+
+    load_dotenv_file(ENV_PATH)
+
+    db_port_raw = get_env("DB_PORT", "3306")
+    try:
+        db_port = int(db_port_raw)
+    except ValueError as exc:
+        raise RuntimeError("`DB_PORT` must be an integer.") from exc
+
+    _CONFIG = AppConfig(
+        db_host=get_env("DB_HOST", required=True),
+        db_port=db_port,
+        db_user=get_env("DB_USER", required=True),
+        db_password=get_env("DB_PASSWORD", required=True),
+        db_schema=get_env("DB_SCHEMA", os.getenv("DB_NAME", "image_registry")),
+        db_table=get_env("DB_TABLE", "image_assets"),
+        ai_model_id=get_env("AI_MODEL_ID", "google.gemini-2.5-pro"),
+        ai_language=get_env("AI_LANGUAGE", "en"),
+    )
+    return _CONFIG
+
+
+def get_schema_ref() -> str:
+    return quote_identifier(get_config().db_schema)
+
+
+def get_table_ref() -> str:
+    config = get_config()
+    return f"{quote_identifier(config.db_schema)}.{quote_identifier(config.db_table)}"
 
 
 def module_available(module_name: str) -> bool:
@@ -123,17 +196,19 @@ def get_pil_image():
     return _PIL_IMAGE
 
 
-def get_connection(database: Optional[str] = DB_SCHEMA):
+def get_connection(database: Optional[str] = None):
     mysql_connector = get_mysql_connector()
+    config = get_config()
     kwargs = {
-        "host": DB_HOST,
-        "port": DB_PORT,
-        "user": DB_USER,
-        "password": DB_PASSWORD,
+        "host": config.db_host,
+        "port": config.db_port,
+        "user": config.db_user,
+        "password": config.db_password,
         "autocommit": True,
     }
-    if database is not None:
-        kwargs["database"] = database
+    target_database = config.db_schema if database is None else database
+    if target_database is not None:
+        kwargs["database"] = target_database
     return mysql_connector.connect(**kwargs)
 
 
@@ -142,7 +217,7 @@ def execute_sql(
     params: tuple = (),
     *,
     fetch: bool = False,
-    database: Optional[str] = DB_SCHEMA,
+    database: Optional[str] = None,
 ):
     conn = get_connection(database=database)
     try:
@@ -156,17 +231,19 @@ def execute_sql(
 
 
 def ensure_schema_and_table() -> None:
+    schema_ref = get_schema_ref()
+    table_ref = get_table_ref()
     execute_sql(
-        """
-        CREATE SCHEMA IF NOT EXISTS image_registry
+        f"""
+        CREATE SCHEMA IF NOT EXISTS {schema_ref}
         DEFAULT CHARACTER SET utf8mb4
         COLLATE utf8mb4_0900_ai_ci
         """,
         database=None,
     )
     execute_sql(
-        """
-        CREATE TABLE IF NOT EXISTS image_registry.image_assets (
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_ref} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             image_name VARCHAR(255) NOT NULL,
             original_filename VARCHAR(255) NOT NULL,
@@ -407,8 +484,8 @@ def format_record_label(row: dict) -> str:
 
 def insert_payload(payload: ImagePayload) -> None:
     execute_sql(
-        """
-        INSERT INTO image_registry.image_assets (
+        f"""
+        INSERT INTO {get_table_ref()} (
             image_name,
             original_filename,
             mime_type,
@@ -448,15 +525,17 @@ def generate_image_insight(record_id: int, prompt: str) -> str:
     if not cleaned_prompt:
         raise ValueError("Enter a prompt before generating an AI response.")
 
-    conn = get_connection(database=DB_SCHEMA)
+    config = get_config()
+    table_ref = get_table_ref()
+    conn = get_connection()
     try:
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SET @image_base64 = NULL")
         cursor.execute(
-            """
+            f"""
             SELECT base64_payload
             INTO @image_base64
-            FROM image_registry.image_assets
+            FROM {table_ref}
             WHERE id = %s
             """,
             (record_id,),
@@ -476,7 +555,7 @@ def generate_image_insight(record_id: int, prompt: str) -> str:
                 )
             ) AS response
             """,
-            (cleaned_prompt, AI_LANGUAGE, AI_MODEL_ID),
+            (cleaned_prompt, config.ai_language, config.ai_model_id),
         )
         row = cursor.fetchone()
         if not row:
@@ -487,9 +566,10 @@ def generate_image_insight(record_id: int, prompt: str) -> str:
 
 
 def fetch_records(name_filter: str = ""):
+    table_ref = get_table_ref()
     if name_filter.strip():
         return execute_sql(
-            """
+            f"""
             SELECT
                 id,
                 image_name,
@@ -498,7 +578,7 @@ def fetch_records(name_filter: str = ""):
                 CHAR_LENGTH(base64_payload) AS base64_length,
                 created_at,
                 updated_at
-            FROM image_registry.image_assets
+            FROM {table_ref}
             WHERE image_name LIKE %s
             ORDER BY created_at DESC, id DESC
             """,
@@ -507,7 +587,7 @@ def fetch_records(name_filter: str = ""):
         )
 
     return execute_sql(
-        """
+        f"""
         SELECT
             id,
             image_name,
@@ -516,7 +596,7 @@ def fetch_records(name_filter: str = ""):
             CHAR_LENGTH(base64_payload) AS base64_length,
             created_at,
             updated_at
-        FROM image_registry.image_assets
+        FROM {table_ref}
         ORDER BY created_at DESC, id DESC
         """,
         fetch=True,
@@ -524,8 +604,9 @@ def fetch_records(name_filter: str = ""):
 
 
 def fetch_record(record_id: int):
+    table_ref = get_table_ref()
     rows = execute_sql(
-        """
+        f"""
         SELECT
             id,
             image_name,
@@ -534,7 +615,7 @@ def fetch_record(record_id: int):
             base64_payload,
             created_at,
             updated_at
-        FROM image_registry.image_assets
+        FROM {table_ref}
         WHERE id = %s
         """,
         (record_id,),
@@ -580,6 +661,7 @@ def show_review_panel(st, record: dict) -> None:
 
 
 def show_ai_insight_panel(st, record: dict) -> None:
+    config = get_config()
     prompt_key = f"ai_prompt_{record['id']}"
     response_key = f"ai_response_{record['id']}"
     default_prompt = "Describe this image and call out the most important visible details."
@@ -588,7 +670,7 @@ def show_ai_insight_panel(st, record: dict) -> None:
         st,
         "AI Insight",
         "Ask about the selected image",
-        f"The response is generated by HeatWave with `{AI_MODEL_ID}` using the image shown on this page.",
+        f"The response is generated by HeatWave with `{config.ai_model_id}` using the image shown on this page.",
     )
 
     prompt = st.text_area(
@@ -625,10 +707,17 @@ def show_ai_insight_panel(st, record: dict) -> None:
 def run_streamlit_app() -> None:
     st = get_streamlit()
     st.set_page_config(
-        page_title="Image Library",
+        page_title="HeatWave Image Intelligence",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
+
+    try:
+        config = get_config()
+    except RuntimeError as exc:
+        st.error(str(exc))
+        st.code("cp .env.example .env")
+        st.stop()
 
     ensure_schema_and_table()
     inject_styles(st)
@@ -647,7 +736,7 @@ def run_streamlit_app() -> None:
             </p>
             <div class="app-pills">
                 <span class="app-pill">{len(all_records)} image record(s)</span>
-                <span class="app-pill">{AI_MODEL_ID}</span>
+                <span class="app-pill">{config.ai_model_id}</span>
             </div>
         </div>
         """,
