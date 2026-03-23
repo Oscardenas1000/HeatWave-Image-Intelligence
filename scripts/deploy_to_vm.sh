@@ -70,13 +70,15 @@ rsync -az --delete \
   --exclude '.venv/' \
   --exclude '__pycache__/' \
   --exclude '.env' \
+  --exclude '*.base64.txt' \
   --exclude '*.pyc' \
   "$REPO_ROOT/" "$HOST:$REMOTE_DIR/"
 
 ssh "${SSH_OPTS[@]}" "$HOST" "
   set -euo pipefail
   cd '$REMOTE_DIR'
-  python3 -m venv .venv
+  PYTHON_BIN=\$(command -v python3.11 || command -v python3.10 || command -v python3.9 || command -v python3)
+  \"\$PYTHON_BIN\" -m venv .venv
   . .venv/bin/activate
   pip install --upgrade pip
   pip install -r requirements.txt
