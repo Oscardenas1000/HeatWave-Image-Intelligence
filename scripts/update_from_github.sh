@@ -16,7 +16,7 @@ PYTHON_BIN="$(command -v python3.11 || command -v python3.10 || command -v pytho
 pip install --upgrade pip
 pip install -r requirements.txt
 
-if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^heatwave-image-intelligence\.service'; then
+if command -v systemctl >/dev/null 2>&1 && sudo systemctl cat heatwave-image-intelligence >/dev/null 2>&1; then
   sudo systemctl restart heatwave-image-intelligence
 fi
 
