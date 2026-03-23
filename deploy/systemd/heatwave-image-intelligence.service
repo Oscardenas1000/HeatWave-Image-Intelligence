@@ -1,0 +1,15 @@
+[Unit]
+Description=HeatWave Image Intelligence Streamlit App
+After=network.target
+
+[Service]
+Type=simple
+User=opc
+WorkingDirectory=/home/opc/heatwave-image-intelligence
+Environment=HOME=/home/opc
+ExecStart=/usr/bin/bash -lc 'cd /home/opc/heatwave-image-intelligence && exec .venv/bin/python heatwave_image_app.py'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

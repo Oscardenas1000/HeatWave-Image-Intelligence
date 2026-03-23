@@ -13,6 +13,7 @@ HeatWave Image Intelligence is a Streamlit app for:
 - `requirements.txt`: Python dependencies
 - `.env.example`: required runtime configuration template
 - `scripts/deploy_to_vm.sh`: repeatable Linux VM deployment helper
+- `deploy/systemd/heatwave-image-intelligence.service`: optional systemd unit for long-running VM hosting
 
 ## Prerequisites
 
@@ -88,6 +89,15 @@ cd /home/opc/heatwave-image-intelligence
 cp .env.example .env
 vi .env
 .venv/bin/python heatwave_image_app.py
+```
+
+To run it as a service on boot:
+
+```bash
+sudo cp deploy/systemd/heatwave-image-intelligence.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now heatwave-image-intelligence
+sudo systemctl status heatwave-image-intelligence
 ```
 
 If the VM does not already have a modern Python installed, install one first. On Oracle Linux / RHEL that is typically:
