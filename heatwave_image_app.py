@@ -16,9 +16,11 @@ from typing import Optional
 APP_PATH = Path(__file__).resolve()
 APP_DIR = APP_PATH.parent
 ENV_PATH = APP_DIR / ".env"
+SQL_DIR = APP_DIR / "sql"
 VENV_DIR = APP_DIR / ".venv"
 REQUIRED_PACKAGES = ("streamlit", "mysql-connector-python", "pillow")
 IMAGE_UPLOAD_TYPES = ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
+DEFAULT_DATABASE = object()
 
 _STREAMLIT = None
 _MYSQL_CONNECTOR = None
@@ -113,6 +115,28 @@ def get_table_ref() -> str:
     return f"{quote_identifier(config.db_schema)}.{quote_identifier(config.db_table)}"
 
 
+def render_sql_template(sql_text: str) -> str:
+    config = get_config()
+    rendered = sql_text
+    replacements = {
+        "{{SCHEMA_NAME}}": quote_identifier(config.db_schema),
+        "{{TABLE_NAME}}": quote_identifier(config.db_table),
+        "{{FULL_TABLE_NAME}}": get_table_ref(),
+    }
+
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
+
+    return rendered.strip()
+
+
+def get_bootstrap_sql_files() -> list[Path]:
+    sql_files = sorted(SQL_DIR.glob("*.sql"))
+    if not sql_files:
+        raise RuntimeError(f"No bootstrap SQL files were found in `{SQL_DIR}`.")
+    return sql_files
+
+
 def module_available(module_name: str) -> bool:
     try:
         return importlib.util.find_spec(module_name) is not None
@@ -196,7 +220,7 @@ def get_pil_image():
     return _PIL_IMAGE
 
 
-def get_connection(database: Optional[str] = None):
+def get_connection(database=DEFAULT_DATABASE):
     mysql_connector = get_mysql_connector()
     config = get_config()
     kwargs = {
@@ -206,7 +230,7 @@ def get_connection(database: Optional[str] = None):
         "password": config.db_password,
         "autocommit": True,
     }
-    target_database = config.db_schema if database is None else database
+    target_database = config.db_schema if database is DEFAULT_DATABASE else database
     if target_database is not None:
         kwargs["database"] = target_database
     return mysql_connector.connect(**kwargs)
@@ -217,7 +241,7 @@ def execute_sql(
     params: tuple = (),
     *,
     fetch: bool = False,
-    database: Optional[str] = None,
+    database=DEFAULT_DATABASE,
 ):
     conn = get_connection(database=database)
     try:
@@ -231,35 +255,8 @@ def execute_sql(
 
 
 def ensure_schema_and_table() -> None:
-    schema_ref = get_schema_ref()
-    table_ref = get_table_ref()
-    execute_sql(
-        f"""
-        CREATE SCHEMA IF NOT EXISTS {schema_ref}
-        DEFAULT CHARACTER SET utf8mb4
-        COLLATE utf8mb4_0900_ai_ci
-        """,
-        database=None,
-    )
-    execute_sql(
-        f"""
-        CREATE TABLE IF NOT EXISTS {table_ref} (
-            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            image_name VARCHAR(255) NOT NULL,
-            original_filename VARCHAR(255) NOT NULL,
-            mime_type VARCHAR(100) NOT NULL,
-            base64_payload LONGTEXT NOT NULL,
-            created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            PRIMARY KEY (id),
-            KEY idx_image_assets_name_created_at (image_name, created_at, id),
-            KEY idx_image_assets_created_at (created_at, id)
-        ) ENGINE=InnoDB
-        DEFAULT CHARSET=utf8mb4
-        COLLATE=utf8mb4_0900_ai_ci
-        COMMENT='Base64 image registry for manual upload and review'
-        """
-    )
+    for sql_file in get_bootstrap_sql_files():
+        execute_sql(render_sql_template(sql_file.read_text(encoding="utf-8")), database=None)
 
 
 def clean_base64_text(base64_text: str) -> tuple[str, Optional[str]]:

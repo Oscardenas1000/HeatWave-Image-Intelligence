@@ -12,7 +12,9 @@ HeatWave Image Intelligence is a Streamlit app for:
 - `img_to_base64.py`: helper that converts an image file into a base64 text file
 - `requirements.txt`: Python dependencies
 - `.env.example`: required runtime configuration template
+- `sql/`: idempotent schema bootstrap files applied at app startup
 - `scripts/deploy_to_vm.sh`: repeatable Linux VM deployment helper
+- `scripts/update_from_github.sh`: pulls the latest GitHub state and refreshes the VM install
 - `deploy/systemd/heatwave-image-intelligence.service`: optional systemd unit for long-running VM hosting
 
 ## Prerequisites
@@ -71,6 +73,8 @@ At startup, the app ensures that the target schema and table exist. By default, 
 
 Each stored image record includes the image name, original filename, MIME type, base64 payload, and timestamps.
 
+At startup, the app reads the ordered SQL files in `sql/` and applies them with `CREATE ... IF NOT EXISTS`, so a fresh HeatWave instance is initialized automatically and an existing one is skipped safely.
+
 ## VM deployment
 
 For a Linux VM, use the included deployment helper:
@@ -98,6 +102,12 @@ sudo cp deploy/systemd/heatwave-image-intelligence.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now heatwave-image-intelligence
 sudo systemctl status heatwave-image-intelligence
+```
+
+To pull the latest GitHub changes onto an instance and restart the app:
+
+```bash
+scripts/update_from_github.sh
 ```
 
 If the VM does not already have a modern Python installed, install one first. On Oracle Linux / RHEL that is typically:
