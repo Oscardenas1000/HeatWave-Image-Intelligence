@@ -6,9 +6,12 @@ from heatwave_image_app import (
     DEFAULT_BACKEND_URL,
     ImageSummary,
     RuntimeDiagnostics,
+    build_image_data_url,
     build_runtime_diagnostics,
     build_streamlit_launch_environment,
+    format_byte_count,
     format_detected_language_label,
+    library_option_label,
     make_fallback_run_stamp,
     resolved_selection,
     should_bootstrap_local_backend,
@@ -74,6 +77,20 @@ def test_validate_base_url_requires_scheme_and_host() -> None:
         "Enter a valid backend URL including the scheme and host."
     )
     assert validate_base_url("http://127.0.0.1:8000") is None
+
+
+def test_library_option_label_includes_name_and_record_id() -> None:
+    assert library_option_label(make_summary(7)) == "Image 7 (#7)"
+
+
+def test_format_byte_count_scales_human_readably() -> None:
+    assert format_byte_count(900) == "900 B"
+    assert format_byte_count(2048) == "2.0 KB"
+    assert format_byte_count(5 * 1024 * 1024) == "5.0 MB"
+
+
+def test_build_image_data_url_encodes_payload() -> None:
+    assert build_image_data_url(b"abc", "image/png") == "data:image/png;base64,YWJj"
 
 
 def test_should_bootstrap_local_backend_only_for_local_http_urls_with_ports() -> None:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import html
 import importlib.util
 import json
@@ -346,6 +347,56 @@ def validate_base_url(base_url: str) -> Optional[str]:
 
 def invalid_backend_url_message(base_url: str) -> str:
     return f"Invalid backend URL: {base_url}"
+
+
+def format_byte_count(byte_count: int) -> str:
+    if byte_count < 1024:
+        return f"{byte_count} B"
+
+    scaled_value = float(byte_count)
+    unit = "B"
+    for unit in ("KB", "MB", "GB"):
+        scaled_value /= 1024.0
+        if scaled_value < 1024.0 or unit == "GB":
+            break
+    return f"{scaled_value:.1f} {unit}"
+
+
+def library_option_label(record: ImageSummary) -> str:
+    return f"{record.image_name} (#{record.id})"
+
+
+def build_image_data_url(image_bytes: bytes, mime_type: str) -> str:
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def render_image_stage(
+    container,
+    *,
+    image_bytes: bytes,
+    mime_type: str,
+    alt_text: str,
+    detail_pills: list[str],
+    max_height_px: int = 620,
+) -> None:
+    data_url = build_image_data_url(image_bytes, mime_type)
+    pills_markup = "".join(
+        f'<span class="preview-detail-pill">{html.escape(detail)}</span>'
+        for detail in detail_pills
+        if detail.strip()
+    )
+    container.markdown(
+        f"""
+        <div class="preview-stage" style="--preview-max-height: {max_height_px}px;">
+            <img src="{data_url}" alt="{html.escape(alt_text)}" />
+        </div>
+        <div class="preview-detail-pills">
+            {pills_markup}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def should_bootstrap_local_backend(base_url: str) -> bool:
@@ -959,6 +1010,9 @@ def inject_styles(st) -> None:
             padding-top: 1.6rem;
             padding-bottom: 3rem;
         }
+        section[data-testid="stSidebar"] .block-container {
+            padding-top: 1.25rem;
+        }
         h1, h2, h3, p, div, span, label {
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
         }
@@ -982,7 +1036,8 @@ def inject_styles(st) -> None:
         }
         div[data-testid="stTextInputRootElement"] input,
         div[data-testid="stTextArea"] textarea,
-        div[data-testid="stFileUploader"] section {
+        div[data-testid="stFileUploader"] section,
+        div[data-baseweb="select"] > div {
             border-radius: 18px !important;
             border: 1px solid rgba(17, 17, 17, 0.08) !important;
             background: rgba(255, 255, 255, 0.92) !important;
@@ -990,13 +1045,29 @@ def inject_styles(st) -> None:
         div[data-testid="stImage"] img {
             border-radius: 22px;
         }
+        div[data-baseweb="select"] span {
+            font-weight: 600;
+            color: #1d1d1f;
+        }
         .app-heading {
-            padding: 0.1rem 0 0.6rem 0;
+            padding: 0.05rem 0 0.45rem 0;
+        }
+        .app-heading h1 {
+            font-size: clamp(2.35rem, 3.1vw, 3.5rem);
+            line-height: 1.06;
+            margin-bottom: 0.18rem;
+            max-width: 16ch;
+        }
+        .app-heading h2 {
+            font-size: 1.18rem;
+            line-height: 1.3;
+            margin-bottom: 0;
         }
         .app-heading p {
-            margin: 0.45rem 0 0 0;
+            margin: 0.32rem 0 0 0;
             color: #5f636b;
-            line-height: 1.55;
+            line-height: 1.5;
+            max-width: 60rem;
         }
         .section-eyebrow {
             margin: 0 0 0.55rem 0;
@@ -1067,6 +1138,68 @@ def inject_styles(st) -> None:
             font-size: 0.84rem;
             line-height: 1.45;
         }
+        .library-summary-card {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            padding: 1rem 1rem 0.95rem 1rem;
+            margin-top: 0.55rem;
+            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid rgba(17, 17, 17, 0.06);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+        }
+        .library-summary-card strong {
+            font-size: 1rem;
+            line-height: 1.3;
+            color: #1d1d1f;
+        }
+        .library-summary-meta {
+            color: #69707a;
+            font-size: 0.84rem;
+            line-height: 1.45;
+        }
+        .preview-stage {
+            --preview-max-height: 620px;
+            min-height: 26rem;
+            padding: 1.15rem;
+            border-radius: 26px;
+            background:
+                radial-gradient(circle at top left, rgba(217, 232, 255, 0.78), transparent 34%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(242, 245, 251, 0.96));
+            border: 1px solid rgba(17, 17, 17, 0.06);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .preview-stage img {
+            display: block;
+            width: auto;
+            max-width: 100%;
+            max-height: var(--preview-max-height);
+            object-fit: contain;
+            border-radius: 24px;
+            box-shadow: 0 22px 48px rgba(15, 23, 42, 0.16);
+            background: rgba(255, 255, 255, 0.94);
+        }
+        .preview-detail-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin-top: 0.9rem;
+        }
+        .preview-detail-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.45rem 0.78rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.84);
+            border: 1px solid rgba(17, 17, 17, 0.07);
+            color: #525963;
+            font-size: 0.84rem;
+            line-height: 1.2;
+        }
         .runtime-footer {
             margin-top: 1rem;
             color: #6a6f78;
@@ -1124,14 +1257,14 @@ def render_sidebar_header(st) -> None:
         unsafe_allow_html=True,
     )
 
-    action_cols = st.sidebar.columns(3)
-    if action_cols[0].button("Upload", use_container_width=True):
+    if st.sidebar.button("Upload Image", width="stretch", type="primary"):
         st.session_state.show_upload_panel = not st.session_state.show_upload_panel
 
-    if action_cols[1].button("Refresh", use_container_width=True):
+    action_cols = st.sidebar.columns(2)
+    if action_cols[0].button("Refresh", width="stretch"):
         st.session_state.refresh_requested = True
 
-    if action_cols[2].button("Settings", use_container_width=True):
+    if action_cols[1].button("Settings", width="stretch"):
         st.session_state.show_settings_panel = not st.session_state.show_settings_panel
 
     st.sidebar.text_input(
@@ -1167,12 +1300,12 @@ def render_settings_panel(st) -> None:
         diag_cols[2].code(st.session_state.prompt_log_path or "Disabled")
 
         button_cols = st.columns(2)
-        if button_cols[0].button("Reset to Default", use_container_width=True):
+        if button_cols[0].button("Reset to Default", width="stretch"):
             reset_to_default_backend_url()
             st.session_state.refresh_requested = True
             st.rerun()
 
-        if button_cols[1].button("Refresh Data", use_container_width=True):
+        if button_cols[1].button("Refresh Data", width="stretch"):
             st.session_state.refresh_requested = True
 
 
@@ -1184,7 +1317,7 @@ def render_sidebar_library(st) -> None:
 
     if st.session_state.banner_message:
         st.sidebar.success(st.session_state.banner_message)
-        if st.sidebar.button("Dismiss", key="dismiss_banner", use_container_width=True):
+        if st.sidebar.button("Dismiss", key="dismiss_banner", width="stretch"):
             st.session_state.banner_message = None
             st.rerun()
 
@@ -1192,31 +1325,45 @@ def render_sidebar_library(st) -> None:
         st.sidebar.error(st.session_state.library_error_message)
 
     if st.session_state.records:
-        for record in st.session_state.records:
-            is_selected = record.id == st.session_state.selected_record_id
-            button_type = "primary" if is_selected else "secondary"
-            if st.sidebar.button(
-                record.image_name,
-                key=f"library_row_{record.id}",
-                use_container_width=True,
-                type=button_type,
-            ):
-                if record.id != st.session_state.selected_record_id:
-                    st.session_state.selected_record_id = record.id
-                    reset_selection_dependent_state()
-                    with st.spinner("Loading image detail..."):
-                        load_detail(record.id)
-                    st.rerun()
+        st.sidebar.caption(f"{len(st.session_state.records)} matching records")
+        current_index = next(
+            (
+                index
+                for index, record in enumerate(st.session_state.records)
+                if record.id == st.session_state.selected_record_id
+            ),
+            0,
+        )
+        selected_record = st.sidebar.selectbox(
+            "Browse images",
+            options=st.session_state.records,
+            index=current_index,
+            format_func=library_option_label,
+            width="stretch",
+        )
+        st.sidebar.markdown(
+            f"""
+            <div class="library-summary-card">
+                <span class="section-eyebrow">Current Selection</span>
+                <strong>{html.escape(selected_record.image_name)}</strong>
+                <span class="library-summary-meta">
+                    #{selected_record.id} • {html.escape(selected_record.original_filename)}
+                </span>
+                <span class="library-summary-meta">
+                    {selected_record.base64_length:,} base64 chars •
+                    Updated {html.escape(format_timestamp(selected_record.updated_at))}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            st.sidebar.markdown(
-                f"""
-                <div class="record-meta">
-                    #{record.id} • {html.escape(record.original_filename)}<br/>
-                    {record.base64_length:,} base64 chars
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        if selected_record.id != st.session_state.selected_record_id:
+            st.session_state.selected_record_id = selected_record.id
+            reset_selection_dependent_state()
+            with st.spinner("Loading image detail..."):
+                load_detail(selected_record.id)
+            st.rerun()
     elif not st.session_state.library_error_message:
         render_empty_state(
             st.sidebar,
@@ -1285,7 +1432,7 @@ def render_upload_panel(st) -> None:
             if action_cols[0].button(
                 "Auto-Generate",
                 key="upload_generate_description",
-                use_container_width=True,
+                width="stretch",
                 disabled=current_uploaded_file() is None,
             ):
                 capture_upload_state()
@@ -1331,7 +1478,7 @@ def render_upload_panel(st) -> None:
             if footer_cols[0].button(
                 "Cancel",
                 key="cancel_upload_panel",
-                use_container_width=True,
+                width="stretch",
             ):
                 clear_upload_state()
                 st.session_state.show_upload_panel = False
@@ -1346,7 +1493,7 @@ def render_upload_panel(st) -> None:
                 "Save To Library",
                 key="save_upload_panel",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=not can_save_upload,
             ):
                 capture_upload_state()
@@ -1391,21 +1538,40 @@ def render_upload_panel(st) -> None:
                     st.error(f"Unable to preview the selected image: {exc}")
                 else:
                     preview_name = st.session_state.upload_name.strip() or uploaded_file.name
-                    st.image(uploaded_bytes, caption=preview_name, use_container_width=True)
-                    st.caption(
-                        f"{preview.format_name} | {preview.width}x{preview.height} | "
-                        f"{(trimmed_non_empty(uploaded_file.type) or 'application/octet-stream')} | "
-                        f"{len(uploaded_bytes):,} bytes"
+                    render_image_stage(
+                        st,
+                        image_bytes=uploaded_bytes,
+                        mime_type=trimmed_non_empty(uploaded_file.type) or "application/octet-stream",
+                        alt_text=preview_name,
+                        detail_pills=[
+                            preview_name,
+                            f"{preview.format_name} • {preview.width}x{preview.height}",
+                            format_byte_count(len(uploaded_bytes)),
+                        ],
+                        max_height_px=420,
                     )
 
 
-def render_image_card(st) -> None:
+def render_image_card(st, detail: ImageDetail) -> None:
     with st.container(border=True):
         st.markdown("### Preview")
         image_bytes = st.session_state.selected_image_bytes
         if image_bytes:
             try:
-                st.image(image_bytes, use_container_width=True)
+                preview = detect_image_details(image_bytes)
+                render_image_stage(
+                    st,
+                    image_bytes=image_bytes,
+                    mime_type=detail.mime_type,
+                    alt_text=detail.image_name,
+                    detail_pills=[
+                        detail.image_name,
+                        f"{preview.format_name} • {preview.width}x{preview.height}",
+                        detail.original_filename,
+                        format_byte_count(len(image_bytes)),
+                    ],
+                    max_height_px=640,
+                )
             except Exception:
                 render_empty_state(
                     st,
@@ -1429,7 +1595,7 @@ def render_description_card(st, detail: ImageDetail) -> None:
         if action_cols[0].button(
             "Update Description",
             key="generate_existing_description",
-            use_container_width=True,
+            width="stretch",
         ):
             if st.session_state.selected_record_id is None:
                 st.session_state.description_error_message = (
@@ -1452,7 +1618,7 @@ def render_description_card(st, detail: ImageDetail) -> None:
         if action_cols[1].button(
             "Save Description",
             key="save_existing_description",
-            use_container_width=True,
+            width="stretch",
             disabled=not st.session_state.description_draft.strip(),
         ):
             if st.session_state.selected_record_id is None:
@@ -1527,7 +1693,7 @@ def render_insight_card(st) -> None:
             "Generate Insight",
             key="generate_insight",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=(
                 st.session_state.selected_record_id is None
                 or not st.session_state.insight_prompt.strip()
@@ -1598,15 +1764,17 @@ def render_detail_pane(st) -> None:
         f"{detail.original_filename} • {detail.mime_type} • #{detail.id}"
     )
 
-    left_col, right_col = st.columns([1.55, 1.0], gap="large")
+    render_image_card(st, detail)
+
+    left_col, right_col = st.columns([1.08, 0.92], gap="large")
 
     with left_col:
-        render_image_card(st)
         render_description_card(st, detail)
-        render_metadata_card(st, detail)
 
     with right_col:
         render_insight_card(st)
+
+    render_metadata_card(st, detail)
 
 
 def run_streamlit_app() -> None:
