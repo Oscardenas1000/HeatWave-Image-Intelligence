@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -34,7 +35,7 @@ class ImageSummary(APIModel):
 
 
 class ImageDetail(ImageSummary):
-    description: str | None = None
+    description: Optional[str] = None
 
 
 class InsightRequest(APIModel):
@@ -43,7 +44,7 @@ class InsightRequest(APIModel):
 
 class InsightResponse(APIModel):
     text: str
-    detected_language: str
+    detected_language: Optional[str] = None
 
 
 class DescriptionUpdateRequest(APIModel):
@@ -56,4 +57,4 @@ class DescriptionGenerationRequest(APIModel):
 
 class GeneratedDescriptionResponse(APIModel):
     description: str
-    detected_language: str
+    detected_language: Optional[str] = None
