@@ -1005,9 +1005,24 @@ def inject_styles(st) -> None:
                 linear-gradient(180deg, #f7f8fb 0%, #eef2f7 100%);
             color: #1d1d1f;
         }
+        header[data-testid="stHeader"] {
+            height: 0;
+            background: transparent;
+            border: 0;
+        }
+        header[data-testid="stHeader"] > div,
+        div[data-testid="stToolbar"],
+        div[data-testid="stDecoration"],
+        #MainMenu,
+        button[kind="header"] {
+            display: none !important;
+        }
+        div[data-testid="stAppViewContainer"] > .main {
+            padding-top: 0;
+        }
         .block-container {
             max-width: 1360px;
-            padding-top: 1.6rem;
+            padding-top: 0.8rem;
             padding-bottom: 3rem;
         }
         section[data-testid="stSidebar"] .block-container {
@@ -1052,11 +1067,27 @@ def inject_styles(st) -> None:
         .app-heading {
             padding: 0.05rem 0 0.45rem 0;
         }
+        .app-heading--primary {
+            padding: 1rem 1.3rem;
+            margin-bottom: 0.9rem;
+            border-radius: 30px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(244, 248, 255, 0.9));
+            border: 1px solid rgba(17, 17, 17, 0.06);
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(18px);
+        }
         .app-heading h1 {
             font-size: clamp(2.35rem, 3.1vw, 3.5rem);
             line-height: 1.06;
             margin-bottom: 0.18rem;
             max-width: 16ch;
+        }
+        .app-heading--primary h1 {
+            margin: 0;
+            max-width: none;
+            font-size: clamp(1.95rem, 2.65vw, 2.8rem);
+            line-height: 1.02;
+            letter-spacing: 0.12em;
         }
         .app-heading h2 {
             font-size: 1.18rem;
@@ -1385,13 +1416,8 @@ def render_sidebar_library(st) -> None:
 def render_app_header(st) -> None:
     st.markdown(
         """
-        <div class="app-heading">
-            <p class="section-eyebrow">HeatWave Image Intelligence</p>
-            <h1>Inspect, describe, and analyze your image library.</h1>
-            <p>
-                The Streamlit app uses the FastAPI backend for uploads, descriptions, insights,
-                and runtime diagnostics so the full image workflow stays in one place.
-            </p>
+        <div class="app-heading app-heading--primary">
+            <h1>HEATWAVE IMAGE INTELLIGENCE</h1>
         </div>
         """,
         unsafe_allow_html=True,
