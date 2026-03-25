@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS {{FULL_TABLE_NAME}} (
     original_filename VARCHAR(255) NOT NULL,
     mime_type VARCHAR(100) NOT NULL,
     base64_payload LONGTEXT NOT NULL,
+    description TEXT NULL COMMENT 'User-provided or AI-generated image description used as prompt context',
     created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),

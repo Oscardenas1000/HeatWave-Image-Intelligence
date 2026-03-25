@@ -5,3 +5,8 @@ __pycache__/
 *.base64.txt
 .DS_Store
 .streamlit/secrets.toml
+.build/
+.swiftpm/
+DerivedData/
+dist/
+*.xcodeproj/xcuserdata/

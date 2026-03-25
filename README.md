@@ -1,6 +1,12 @@
 # HeatWave Image Intelligence
 
-HeatWave Image Intelligence is a Streamlit app for:
+HeatWave Image Intelligence now includes three app surfaces:
+
+- a native `macOS` SwiftUI client
+- a `FastAPI` backend that owns HeatWave / MySQL access
+- the original `Streamlit` app kept as a fallback reference
+
+The core workflow is the same across the app surfaces:
 
 - uploading images into Oracle HeatWave as base64 payloads
 - browsing a searchable image library
@@ -8,7 +14,13 @@ HeatWave Image Intelligence is a Streamlit app for:
 
 ## Project layout
 
-- `heatwave_image_app.py`: main Streamlit application
+- `backend/`: FastAPI service, shared config/bootstrap/database logic, and API routes
+- `Sources/HeatWaveImageClientCore/`: shared Swift models, API client, settings, and view models
+- `Sources/HeatWaveImageIntelligenceMac/`: native macOS SwiftUI app
+- `Tests/HeatWaveImageClientCoreTests/`: Swift unit tests for the client and view models
+- `tests/`: Python backend tests
+- `Package.swift`: Swift package manifest for the macOS app
+- `heatwave_image_app.py`: original Streamlit application
 - `img_to_base64.py`: helper that converts an image file into a base64 text file
 - `requirements.txt`: Python dependencies
 - `.env.example`: required runtime configuration template
@@ -20,13 +32,14 @@ HeatWave Image Intelligence is a Streamlit app for:
 ## Prerequisites
 
 - Python 3.9+
+- Swift 6.2 / Xcode 16+ on macOS
 - network access to your HeatWave / MySQL instance
 - a database user that can create and read the target schema and table
 - HeatWave `ML_GENERATE` access for image-aware prompts
 
 ## Quick start
 
-1. Create a virtual environment and install dependencies.
+1. Create a virtual environment and install Python dependencies.
 
 ```bash
 python3 -m venv .venv
@@ -52,19 +65,76 @@ AI_MODEL_ID=google.gemini-2.5-pro
 AI_LANGUAGE=en
 ```
 
-4. Launch the app.
+4. Run the FastAPI backend.
+
+```bash
+.venv/bin/uvicorn backend.main:app --reload
+```
+
+5. In a second terminal, launch the native macOS app.
+
+```bash
+swift run HeatWaveImageIntelligenceMac
+```
+
+The macOS app defaults to `http://127.0.0.1:8000` for the backend URL. You can change that later in app settings, and the app stores only that URL locally.
+
+## One-file launcher
+
+If you want one file that starts both the backend and the macOS app, run:
+
+```bash
+./run_heatwave_image_intelligence.command
+```
+
+The launcher will:
+
+- create `.venv` if it does not exist yet
+- install Python requirements if needed
+- start the FastAPI backend on `127.0.0.1:8000`
+- wait for `GET /health` to succeed
+- launch the SwiftUI macOS app with that backend URL
+- stop the backend automatically after the app exits
+
+If `.env` is missing, the launcher will create it from `.env.example` and stop so you can fill in your database credentials first.
+
+For UI-only testing without touching FastAPI/MySQL, launch the app against the bundled mock backend:
+
+```bash
+./run_heatwave_image_intelligence.command --mock-backend
+```
+
+That path uses the same SwiftUI app launcher, injects a visible run stamp into the UI, and exposes the bundled `BluebonnetLonghorn.png` as the "Use Test Image" fixture in the upload sheet.
+
+## Streamlit fallback
+
+The original Streamlit app is still available:
 
 ```bash
 .venv/bin/python heatwave_image_app.py
 ```
 
-The script will hand off to Streamlit automatically. You can also run it directly with:
+You can also run it directly with:
 
 ```bash
 .venv/bin/streamlit run heatwave_image_app.py
 ```
 
-## What the app creates
+The Streamlit fallback now talks to the same FastAPI backend as the native macOS app. It defaults to `http://127.0.0.1:8000`, stores only that backend URL locally, and honors `HEATWAVE_API_BASE_URL` when you want to override the default at launch time.
+
+## Backend API
+
+The FastAPI service exposes:
+
+- `GET /health`
+- `GET /app-info`
+- `GET /images?search=...`
+- `GET /images/{id}`
+- `GET /images/{id}/content`
+- `POST /images`
+- `POST /images/{id}/insights`
+
+## What the backend creates
 
 At startup, the app ensures that the target schema and table exist. By default, it uses:
 
@@ -73,7 +143,72 @@ At startup, the app ensures that the target schema and table exist. By default, 
 
 Each stored image record includes the image name, original filename, MIME type, base64 payload, and timestamps.
 
-At startup, the app reads the ordered SQL files in `sql/` and applies them with `CREATE ... IF NOT EXISTS`, so a fresh HeatWave instance is initialized automatically and an existing one is skipped safely.
+At startup, the backend reads the ordered SQL files in `sql/` and applies them with `CREATE ... IF NOT EXISTS`, so a fresh HeatWave instance is initialized automatically and an existing one is skipped safely.
+
+## Testing
+
+Run the backend tests with:
+
+```bash
+.venv/bin/python -m pytest tests
+```
+
+Run the Swift client build and tests with:
+
+```bash
+swift build
+swift test
+```
+
+Build a standalone macOS app bundle with icon assets and embedded frameworks:
+
+```bash
+bash scripts/build_macos_app.sh
+```
+
+That produces:
+
+```text
+dist/HeatWave Image Intelligence.app
+```
+
+To run the packaged app bundle against the backend launcher flow instead of `swift run`, use:
+
+```bash
+./run_heatwave_image_intelligence.command --built-app
+```
+
+Or for a UI-only bundle repro against the mock backend:
+
+```bash
+./run_heatwave_image_intelligence.command --mock-backend --built-app
+```
+
+Run the launcher-path smoke test with:
+
+```bash
+python3 scripts/smoke_test_launcher.py
+```
+
+That smoke test launches the same `./run_heatwave_image_intelligence.command --mock-backend` entrypoint you use manually, waits for the backend health/app-info endpoints, confirms the launcher log run stamp, and verifies that the macOS app window appears. It requires macOS Accessibility permissions for Terminal / `osascript`.
+
+Use the smoke test to validate the real launcher path. Use `swift test` and the Xcode macOS test target for upload, prompt entry, and insight-generation behavior.
+
+To smoke-test the packaged `.app` bundle instead of the package executable, run:
+
+```bash
+python3 scripts/smoke_test_launcher.py --built-app
+```
+
+For manual launcher repros, compare the run stamp shown in the sidebar or in Settings -> Runtime Diagnostics with the stamp printed in the launcher output. That tells you whether you are looking at the same launched session the automation just exercised.
+
+If you need prompt-input diagnostics for a manual repro, run:
+
+```bash
+HEATWAVE_PROMPT_LOG_PATH=/tmp/heatwave-prompt.log ./run_heatwave_image_intelligence.command --mock-backend
+```
+
+The prompt editor will append focus, key, and text-change events to that log file so you can compare what the app actually received.
 
 ## VM deployment
 
