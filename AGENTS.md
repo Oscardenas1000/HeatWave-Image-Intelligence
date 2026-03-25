@@ -1,33 +1,30 @@
 # AGENTS Guidelines for This Repository
 
-This repository contains three app surfaces for the same product:
+This repository is a Python-only project with two runtime pieces:
 
-- a native macOS SwiftUI client
 - a FastAPI backend that owns HeatWave / MySQL access
-- a Streamlit fallback app that talks to the same backend
+- a Streamlit app in `heatwave_image_app.py`
 
-When working in this repo as an agent, prefer the smallest change that solves the task while keeping those surfaces aligned.
+When working in this repo as an agent, keep changes scoped to the Python application and deployment workflow.
 
-## 1. Respect the App Boundaries
+## 1. Repository Boundaries
 
-- Swift code lives under `Sources/` and `Package.swift`.
 - The backend lives under `backend/`.
-- The Streamlit fallback lives in `heatwave_image_app.py`.
-- Do not change Swift files unless the task explicitly requires Swift work.
-- If you change the backend API contract, update every affected client intentionally. Both the macOS app and the Streamlit app depend on the FastAPI responses.
+- The Streamlit app lives in `heatwave_image_app.py`.
+- Tests live under `tests/`.
+- Do not add macOS / Swift / Xcode project files back into this repository unless the user explicitly asks for that platform to return.
+- If you change the backend API contract, update the Streamlit client in the same change.
 
 ## 2. Important Repository Paths
 
 - `backend/`: FastAPI app, config, database access, image helpers, repository logic
-- `Sources/HeatWaveImageClientCore/`: shared Swift models, API client, settings, and view models
-- `Sources/HeatWaveImageIntelligenceMac/`: SwiftUI macOS app
 - `tests/`: Python backend and Streamlit tests
-- `tests/UITestSupport/mock_backend_server.py`: mock backend for UI-only testing
-- `run_heatwave_image_intelligence.command`: starts the backend and launches the macOS app together
-- `scripts/deploy_to_vm.sh`: copy-and-bootstrap deployment helper for Linux VMs
-- `scripts/update_from_github.sh`: pull latest GitHub changes on a VM and refresh the Python environment
-- `deploy/systemd/heatwave-image-intelligence.service`: VM service definition
+- `tests/ui_support/mock_backend_server.py`: mock backend for UI-only local testing
+- `heatwave_image_app.py`: Streamlit UI and local launcher entrypoint
 - `sql/`: idempotent schema/table bootstrap SQL
+- `scripts/deploy_to_vm.sh`: first-time Linux VM deployment helper
+- `scripts/update_from_github.sh`: GitHub sync and restart helper for deployed instances
+- `deploy/systemd/heatwave-image-intelligence.service`: VM service definition
 
 ## 3. Local Development Workflow
 
@@ -39,75 +36,54 @@ python3 -m venv .venv
 cp .env.example .env
 ```
 
+### Full local app
+
+```bash
+.venv/bin/python heatwave_image_app.py
+```
+
+That path will start a local FastAPI backend automatically when the configured backend URL points at `127.0.0.1` or `localhost`.
+
 ### Backend only
 
 ```bash
 .venv/bin/uvicorn backend.main:app --reload
 ```
 
-### Streamlit fallback
-
-```bash
-.venv/bin/python heatwave_image_app.py
-```
-
-Or:
+### Streamlit only
 
 ```bash
 .venv/bin/streamlit run heatwave_image_app.py
 ```
 
-### Native macOS app
+### UI-only local testing with the mock backend
 
 ```bash
-swift run HeatWaveImageIntelligenceMac
-```
-
-### Combined launcher
-
-```bash
-./run_heatwave_image_intelligence.command
-```
-
-For UI-only testing against the bundled mock backend:
-
-```bash
-./run_heatwave_image_intelligence.command --mock-backend
+.venv/bin/python tests/ui_support/mock_backend_server.py 8766 BluebonnetLonghorn.png
+HEATWAVE_API_BASE_URL=http://127.0.0.1:8766 .venv/bin/streamlit run heatwave_image_app.py
 ```
 
 ## 4. Testing and Verification
 
-- Python tests:
+- Full Python test suite:
 
 ```bash
 .venv/bin/python -m pytest tests
 ```
 
-- Swift tests:
-
-```bash
-swift test
-```
-
-- Launcher smoke test:
-
-```bash
-python3 scripts/smoke_test_launcher.py
-```
-
-- For targeted Python changes, `py_compile` is a good quick sanity check:
+- Quick syntax sanity check:
 
 ```bash
 .venv/bin/python -m py_compile heatwave_image_app.py backend/*.py
 ```
 
-Prefer targeted verification first, then broader suites if the change crosses boundaries.
+Prefer targeted verification first, then broader tests when the change crosses backend and UI boundaries.
 
-## 5. Environment and Secret Handling
+## 5. Environment and Secrets
 
-- Runtime config comes from `.env`. Do not commit `.env` or any secret material.
+- Runtime config comes from `.env`. Never commit `.env` or secrets.
 - The Streamlit app stores only its backend URL locally in `~/.heatwave-image-intelligence/streamlit-settings.json`.
-- Generated local artifacts should stay untracked unless a task explicitly requires them.
+- Deployment-specific credentials stay on the target machine, not in git.
 
 ## 6. Deployment Notes
 
@@ -121,4 +97,4 @@ Prefer targeted verification first, then broader suites if the change crosses bo
 
 - Do not stage or commit temporary folders such as `.playwright-cli/`, `tmp/`, `DerivedData/`, or other local debugging output unless the task explicitly requires them.
 - Avoid destructive git commands.
-- Keep changes scoped. If the task is Streamlit-only or backend-only, leave the Swift app untouched.
+- Keep the repository Python-only. If a change is unrelated to the Streamlit app, backend, tests, or deployment workflow, challenge it before adding files.

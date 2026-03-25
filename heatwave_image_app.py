@@ -1387,10 +1387,10 @@ def render_app_header(st) -> None:
         """
         <div class="app-heading">
             <p class="section-eyebrow">HeatWave Image Intelligence</p>
-            <h1>Streamlit parity for the native macOS workflow.</h1>
+            <h1>Inspect, describe, and analyze your image library.</h1>
             <p>
-                The fallback app now talks to the same FastAPI backend as the Swift client, so
-                uploads, descriptions, insights, and runtime diagnostics stay aligned.
+                The Streamlit app uses the FastAPI backend for uploads, descriptions, insights,
+                and runtime diagnostics so the full image workflow stays in one place.
             </p>
         </div>
         """,

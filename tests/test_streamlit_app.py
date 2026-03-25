@@ -32,7 +32,7 @@ def make_summary(record_id: int) -> ImageSummary:
     )
 
 
-def test_make_fallback_run_stamp_matches_swift_style() -> None:
+def test_make_fallback_run_stamp_matches_direct_run_style() -> None:
     run_stamp = make_fallback_run_stamp(
         datetime(2026, 3, 25, 18, 7, 9, tzinfo=timezone.utc)
     )
@@ -44,8 +44,8 @@ def test_build_runtime_diagnostics_prefers_environment_override() -> None:
     diagnostics = build_runtime_diagnostics(
         {
             "HEATWAVE_API_BASE_URL": "http://127.0.0.1:8123",
-            "HEATWAVE_BUILD_STAMP": "launcher-mock-20260325T180709Z",
-            "HEATWAVE_LAUNCH_SOURCE": "run_heatwave_image_intelligence.command --mock-backend",
+            "HEATWAVE_BUILD_STAMP": "streamlit-mock-20260325T180709Z",
+            "HEATWAVE_LAUNCH_SOURCE": "streamlit-local-mock-backend",
             "HEATWAVE_PROMPT_LOG_PATH": "/tmp/heatwave-prompt.log",
         },
         persisted_base_url="http://persisted.example:9000",
@@ -53,8 +53,8 @@ def test_build_runtime_diagnostics_prefers_environment_override() -> None:
 
     assert diagnostics == RuntimeDiagnostics(
         base_url="http://127.0.0.1:8123",
-        run_stamp="launcher-mock-20260325T180709Z",
-        launch_source="run_heatwave_image_intelligence.command --mock-backend",
+        run_stamp="streamlit-mock-20260325T180709Z",
+        launch_source="streamlit-local-mock-backend",
         prompt_log_path="/tmp/heatwave-prompt.log",
     )
 

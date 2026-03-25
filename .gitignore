@@ -10,3 +10,5 @@ __pycache__/
 DerivedData/
 dist/
 *.xcodeproj/xcuserdata/
+.playwright-cli/
+output/playwright/
