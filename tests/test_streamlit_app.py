@@ -4,13 +4,15 @@ from datetime import datetime, timezone
 
 from heatwave_image_app import (
     DEFAULT_BACKEND_URL,
+    ImageSummary,
     RuntimeDiagnostics,
     build_runtime_diagnostics,
+    build_streamlit_launch_environment,
     format_detected_language_label,
     make_fallback_run_stamp,
     resolved_selection,
+    should_bootstrap_local_backend,
     validate_base_url,
-    ImageSummary,
 )
 
 
@@ -74,6 +76,14 @@ def test_validate_base_url_requires_scheme_and_host() -> None:
     assert validate_base_url("http://127.0.0.1:8000") is None
 
 
+def test_should_bootstrap_local_backend_only_for_local_http_urls_with_ports() -> None:
+    assert should_bootstrap_local_backend("http://127.0.0.1:8000") is True
+    assert should_bootstrap_local_backend("http://localhost:8123") is True
+    assert should_bootstrap_local_backend("http://127.0.0.1") is False
+    assert should_bootstrap_local_backend("https://127.0.0.1:8000") is False
+    assert should_bootstrap_local_backend("http://example.com:8000") is False
+
+
 def test_resolved_selection_prefers_current_then_first_visible() -> None:
     records = [make_summary(2), make_summary(1)]
 
@@ -86,3 +96,27 @@ def test_resolved_selection_prefers_current_then_first_visible() -> None:
 def test_format_detected_language_label_uses_name_when_known() -> None:
     assert format_detected_language_label("en") == "Detected: English (EN)"
     assert format_detected_language_label("zz") == "Detected: ZZ"
+
+
+def test_build_streamlit_launch_environment_pins_runtime_values() -> None:
+    runtime = RuntimeDiagnostics(
+        base_url="http://127.0.0.1:8000",
+        run_stamp="direct-2026-03-25T180709Z",
+        launch_source="direct-streamlit-run",
+        prompt_log_path=None,
+    )
+
+    launch_environment = build_streamlit_launch_environment(
+        runtime,
+        environment={
+            "HEATWAVE_API_BASE_URL": "http://example.com:9999",
+            "HEATWAVE_PROMPT_LOG_PATH": "/tmp/old.log",
+            "OTHER_ENV": "kept",
+        },
+    )
+
+    assert launch_environment["HEATWAVE_API_BASE_URL"] == "http://127.0.0.1:8000"
+    assert launch_environment["HEATWAVE_BUILD_STAMP"] == "direct-2026-03-25T180709Z"
+    assert launch_environment["HEATWAVE_LAUNCH_SOURCE"] == "direct-streamlit-run"
+    assert "HEATWAVE_PROMPT_LOG_PATH" not in launch_environment
+    assert launch_environment["OTHER_ENV"] == "kept"

@@ -7,12 +7,15 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from urllib import error as urllib_error
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 APP_PATH = Path(__file__).resolve()
 APP_DIR = APP_PATH.parent
@@ -20,11 +23,31 @@ ENV_PATH = APP_DIR / ".env"
 VENV_DIR = APP_DIR / ".venv"
 SETTINGS_PATH = Path.home() / ".heatwave-image-intelligence" / "streamlit-settings.json"
 
-REQUIRED_PACKAGES = ("streamlit", "httpx", "pillow")
+REQUIRED_PACKAGES = (
+    "streamlit",
+    "httpx",
+    "pillow",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "mysql-connector-python",
+)
+REQUIRED_MODULES = (
+    "streamlit",
+    "httpx",
+    "PIL",
+    "fastapi",
+    "uvicorn",
+    "multipart",
+    "mysql.connector",
+)
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
 DEFAULT_INSIGHT_PROMPT = "Describe this image and call out the most important visible details."
 DEFAULT_LAUNCH_SOURCE = "direct-streamlit-run"
 DEFAULT_SEARCH_PLACEHOLDER = "Find an image by name"
+LOCAL_BACKEND_HOSTS = {"127.0.0.1", "localhost"}
+LOCAL_BACKEND_READY_TIMEOUT_SECONDS = 30.0
+LOCAL_BACKEND_READY_POLL_INTERVAL_SECONDS = 0.5
 UPLOAD_DESCRIPTION_PROMPT_PLACEHOLDER = (
     "Optional guidance for auto-generating the image description."
 )
@@ -182,14 +205,9 @@ def ensure_runtime_dependencies() -> None:
     pip_bin = VENV_DIR / "bin" / "pip"
     missing = []
 
-    if not module_available("streamlit"):
-        missing.append("streamlit")
-
-    if not module_available("httpx"):
-        missing.append("httpx")
-
-    if not module_available("PIL"):
-        missing.append("pillow")
+    for module_name, package_name in zip(REQUIRED_MODULES, REQUIRED_PACKAGES):
+        if not module_available(module_name):
+            missing.append(package_name)
 
     if not missing:
         return
@@ -202,7 +220,11 @@ def ensure_runtime_dependencies() -> None:
 
     if python_bin.exists():
         ready = subprocess.run(
-            [str(python_bin), "-c", "import streamlit, httpx, PIL"],
+            [
+                str(python_bin),
+                "-c",
+                "import streamlit, httpx, PIL, fastapi, uvicorn, multipart, mysql.connector",
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -324,6 +346,105 @@ def validate_base_url(base_url: str) -> Optional[str]:
 
 def invalid_backend_url_message(base_url: str) -> str:
     return f"Invalid backend URL: {base_url}"
+
+
+def should_bootstrap_local_backend(base_url: str) -> bool:
+    if validate_base_url(base_url) is not None:
+        return False
+
+    parsed = urlparse(base_url.strip())
+    return (
+        parsed.scheme == "http"
+        and parsed.hostname in LOCAL_BACKEND_HOSTS
+        and parsed.port is not None
+    )
+
+
+def backend_healthcheck_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/health"
+
+
+def local_backend_is_ready(base_url: str, *, timeout_seconds: float = 1.0) -> bool:
+    try:
+        request = Request(backend_healthcheck_url(base_url), headers={"Accept": "application/json"})
+        with urlopen(request, timeout=timeout_seconds) as response:
+            return 200 <= getattr(response, "status", 0) < 300
+    except (OSError, ValueError, urllib_error.URLError):
+        return False
+
+
+def start_local_backend(base_url: str) -> subprocess.Popen[Any]:
+    parsed = urlparse(base_url.strip())
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if port is None:
+        raise RuntimeError(f"Cannot start a local backend without an explicit port: {base_url}")
+
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "backend.main:app",
+            "--host",
+            host,
+            "--port",
+            str(port),
+        ]
+    )
+
+
+def ensure_local_backend_ready(base_url: str) -> Optional[subprocess.Popen[Any]]:
+    if not should_bootstrap_local_backend(base_url):
+        return None
+
+    if local_backend_is_ready(base_url):
+        return None
+
+    backend_process = start_local_backend(base_url)
+    deadline = time.monotonic() + LOCAL_BACKEND_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if local_backend_is_ready(base_url):
+            return backend_process
+        if backend_process.poll() is not None:
+            raise RuntimeError(
+                f"Local backend exited before becoming ready at {backend_healthcheck_url(base_url)}."
+            )
+        time.sleep(LOCAL_BACKEND_READY_POLL_INTERVAL_SECONDS)
+
+    stop_background_process(backend_process)
+    raise RuntimeError(
+        f"Local backend did not become ready at {backend_healthcheck_url(base_url)}."
+    )
+
+
+def stop_background_process(process: Optional[subprocess.Popen[Any]]) -> None:
+    if process is None or process.poll() is not None:
+        return
+
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
+def build_streamlit_launch_environment(
+    runtime: RuntimeDiagnostics,
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, str]:
+    launch_environment = dict(environment or os.environ)
+    launch_environment[BASE_URL_ENV_KEY] = runtime.base_url
+    launch_environment[RUN_STAMP_ENV_KEY] = runtime.run_stamp
+    launch_environment[LAUNCH_SOURCE_ENV_KEY] = runtime.launch_source
+
+    if runtime.prompt_log_path is not None:
+        launch_environment[PROMPT_LOG_PATH_ENV_KEY] = runtime.prompt_log_path
+    else:
+        launch_environment.pop(PROMPT_LOG_PATH_ENV_KEY, None)
+
+    return launch_environment
 
 
 def parse_datetime(value: Any) -> datetime:
@@ -1514,12 +1635,20 @@ def run_streamlit_app() -> None:
 
 def run_as_python() -> None:
     python_bin = sys.executable
+    load_dotenv_file()
+    runtime = build_runtime_diagnostics(os.environ, load_persisted_base_url())
+    backend_process = ensure_local_backend_ready(runtime.base_url)
     try:
         raise SystemExit(
-            subprocess.call([python_bin, "-m", "streamlit", "run", str(APP_PATH)])
+            subprocess.call(
+                [python_bin, "-m", "streamlit", "run", str(APP_PATH)],
+                env=build_streamlit_launch_environment(runtime),
+            )
         )
     except KeyboardInterrupt:
         raise SystemExit(0)
+    finally:
+        stop_background_process(backend_process)
 
 
 def main() -> None:
